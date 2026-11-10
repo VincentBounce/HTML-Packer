@@ -51,7 +51,7 @@
 </head>
 <body>
 <header>
-  <h1>HTML Packer v0.4.5</h1> <!-- the version, bumped with each release; each release commit gets the tag v<version> -->
+  <h1>HTML Packer v0.4.6</h1> <!-- the version, bumped with each release; each release commit gets the tag v<version> -->
   <span>Paste or drop an HTML file, or a whole folder: its scripts, styles and files go inside the page; then minify, deflate or Roadroller; the smallest is kept.</span>
 </header>
 <main>
@@ -355,7 +355,7 @@ function showQr(uri) {
   $('dlQr').title = !why ? 'PNG of the QR code' : n > QR_MAX
     ? 'No QR code: the URI is ' + n.toLocaleString('en') + ' bytes, a QR code holds ' + QR_MAX.toLocaleString('en') + ' at most' : 'No QR code: ' + why;
   // under the URI, each limit it passes: the QR code's, then the address bar's
-  const paste = uri.length > PASTE_MAX ? '[' + size(uri.length - PASTE_MAX) + ' too many to paste as a URL in Chrome, Edge or Brave (512,000 characters at most); Firefox and Safari take it]' : '';
+  const paste = uri.length > PASTE_MAX ? '[' + size(uri.length - PASTE_MAX) + ' too many to paste as a URL in Chrome, Edge or Brave (512,000 characters at most);\nFirefox, Waterfox or Safari take it]' : '';
   $('uriNote').textContent = [why, paste].filter(Boolean).join('\n');
   if (why) return;
   qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
