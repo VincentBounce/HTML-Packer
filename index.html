@@ -61,7 +61,7 @@
         <input id="file" type="file" multiple hidden>
         <input id="dir" type="file" webkitdirectory hidden>
       </div>
-      <span id="files" class="note"></span>
+      <div id="files" class="note row"></div>
       <textarea id="src" spellcheck="false" placeholder="Paste HTML here, or drop an .html file or a folder"></textarea>
     </div>
     <div class="card">
@@ -109,7 +109,7 @@ const ROADROLLER_URL = 'https://cdn.jsdelivr.net/npm/roadroller@2.1.0/+esm';
 const bytes = s => new TextEncoder().encode(s).length;
 
 let fileName = 'page.html';
-let assets = new Map(); // files beside the page: path relative to the page's folder → Uint8Array
+let assets = new Map(); // files beside the page: path relative to the page's folder → { bytes: Uint8Array, on: embedded }
 let runId = 0;        // each run gets an id; results of a stale run are dropped
 let worker = null;    // the Roadroller worker of the current run
 
@@ -130,16 +130,34 @@ function assetKey(ref) {
   } catch { return null; }
 }
 
-// Prepended to the page when files are left over: fetch() of one of them answers from the page itself
-const fetchShim = files => '{let A=' + JSON.stringify(files) + ',F=fetch;fetch=(r,o)=>{let u=new URL(r.url||r,"http://a/"),' +
-  'a=u.origin=="http://a"&&A[decodeURIComponent(u.pathname.slice(1))];return a?Promise.resolve(new Response(' +
-  'Uint8Array.from(atob(a[1]),c=>c.charCodeAt(0)),{headers:{"Content-Type":a[0]}})):F(r,o)}}';
+const embedded = () => [...assets].filter(([, a]) => a.on);
 
-// Scripts and stylesheets go inline, media become data: URIs, every other file is served by the fetch shim
+// Files nobody fetches by default: unticked when loaded (the box can tick them back)
+const isDoc = path => /(^|\/)(license|licence|readme|changelog|copying)(\.[^/]*)?$|\.md$/i.test(path);
+
+// The fetch shim, put first in the page when files are left over: fetch() of one of them answers from the page.
+// files: { key: [mime, base64] }, or with binary: { key: [mime, start, end] } in the inflated bytes B (see packDeflateFiles)
+const fetchShim = (files, binary) => '{let A=' + JSON.stringify(files) + ',F=fetch;fetch=(r,o)=>{let u=new URL(r.url||r,"http://a/"),' +
+  'a=u.origin=="http://a"&&A[decodeURIComponent(u.pathname.slice(1))];return a?Promise.resolve(new Response(' +
+  (binary ? 'B.slice(a[1],a[2])' : 'Uint8Array.from(atob(a[1]),c=>c.charCodeAt(0))') + ',{headers:{"Content-Type":a[0]}})):F(r,o)}}';
+
+const textShim = served => served.length ? fetchShim(Object.fromEntries(served.map(k => [k, [mime(k), base64(assets.get(k).bytes)]]))) : '';
+
+// [doctype, rest]: what goes before a script put first in the page
+const splitDoctype = html => { const d = (html.match(/^<!doctype[^>]*>/i) || [''])[0]; return [d, html.slice(d.length)]; };
+
+// A script before <html> lands first in <head>, as the parser builds it
+function withShim(html, shim) {
+  if (!shim) return html;
+  const [doctype, rest] = splitDoctype(html);
+  return doctype + '<script>' + shim + '</' + 'script>' + rest;
+}
+
+// Scripts and stylesheets go inline, media become data: URIs; returns the page and the files left for the fetch shim
 function inlineAssets(html) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const used = new Set();
-  const take = ref => { const k = assetKey(ref || ''); if (k != null && assets.has(k)) { used.add(k); return [k, assets.get(k)]; } };
+  const take = ref => { const k = assetKey(ref || ''); if (k != null && assets.get(k)?.on) { used.add(k); return [k, assets.get(k).bytes]; } };
   const text = u8 => new TextDecoder().decode(u8);
   for (const s of doc.querySelectorAll('script[src]')) {
     const a = take(s.getAttribute('src'));
@@ -162,14 +180,8 @@ function inlineAssets(html) {
     const a = take(m.getAttribute(attr));
     if (a) m.setAttribute(attr, 'data:' + mime(a[0]) + ';base64,' + base64(a[1]));
   }
-  const served = [...assets.keys()].filter(k => !used.has(k));
-  if (served.length) {
-    const shim = doc.createElement('script');
-    shim.textContent = fetchShim(Object.fromEntries(served.map(k => [k, [mime(k), base64(assets.get(k))]])));
-    doc.head.prepend(shim);
-  }
   const doctype = doc.doctype ? '<!DOCTYPE ' + doc.doctype.name + '>' : '';
-  return doctype + doc.documentElement.outerHTML;
+  return { html: doctype + doc.documentElement.outerHTML, served: embedded().map(([k]) => k).filter(k => !used.has(k)) };
 }
 
 /* ---- Minify ------------------------------------------------------------ */
@@ -203,11 +215,28 @@ function base64(u8) {
   return btoa(s);
 }
 
+async function deflate64(blob) {
+  const stream = blob.stream().pipeThrough(new CompressionStream('deflate-raw'));
+  return base64(new Uint8Array(await new Response(stream).arrayBuffer()));
+}
+
 async function packDeflate(html) {
-  const stream = new Blob([html]).stream().pipeThrough(new CompressionStream('deflate-raw'));
-  const b64 = base64(new Uint8Array(await new Response(stream).arrayBuffer()));
-  return '<script>(async()=>document.write(await new Response((await fetch("data:;base64,' + b64 +
+  return '<script>(async()=>document.write(await new Response((await fetch("data:;base64,' + await deflate64(new Blob([html])) +
     '")).body.pipeThrough(new DecompressionStream("deflate-raw"))).text()))()</' + 'script>';
+}
+
+// With files for the fetch shim, deflate carries them as raw bytes (not base64 inside the base64), in a stream of
+// their own: binary and text in one deflate stream share Huffman tables and cost ~10 % more (Q1K3: 14,940 B against
+// 13,407 B apart), and CompressionStream cannot end a block. The loader keeps the files' bytes in B
+// (document.write keeps the window, so B stays) and writes the page.
+async function packDeflateFiles(html, served) {
+  const files = {}, parts = [];
+  let at = 0;
+  for (const k of served) { const b = assets.get(k).bytes; files[k] = [mime(k), at, at += b.length]; parts.push(b); }
+  const page = withShim(html, fetchShim(files, true));
+  return '<script>(async()=>{let i=async s=>new Response((await fetch("data:;base64,"+s)).body.pipeThrough(new DecompressionStream("deflate-raw")));' +
+    'B=new Uint8Array(await(await i("' + await deflate64(new Blob(parts)) + '")).arrayBuffer());' +
+    'document.write(await(await i("' + await deflate64(new Blob([page])) + '")).text())})()</' + 'script>';
 }
 
 // Roadroller runs in a Web Worker made from a Blob, so the UI stays responsive.
@@ -227,8 +256,8 @@ onmessage = async ({ data: html }) => {
 // a written doctype would come too late (quirks mode) and the loader <script> would stay in the DOM.
 // So the doctype goes before the script, and the script removes itself.
 async function packRoadroller(html, onProgress) {
-  const doctype = (html.match(/^<!doctype[^>]*>/i) || [''])[0];
-  const code = await runRoadroller(html.slice(doctype.length), onProgress);
+  const [doctype, rest] = splitDoctype(html);
+  const code = await runRoadroller(rest, onProgress);
   return doctype + '<script>' + code + ';document.currentScript.remove()</' + 'script>';
 }
 
@@ -319,16 +348,18 @@ async function run() {
   const id = ++runId;
   stopWorker();
   setStatus('Minifying…');
-  const page = assets.size ? inlineAssets(src) : src;
-  let min;
+  const { html: page, served } = assets.size ? inlineAssets(src) : { html: src, served: [] };
+  let bare;
   try {
-    min = await HTMLMinifier.minify(page, minifyOptions($('optAggr').checked));
+    bare = await HTMLMinifier.minify(page, minifyOptions($('optAggr').checked));
   } catch (e) { if (id === runId) setStatus('Minify error: ' + (e.message || e)); return; }
   if (id !== runId) return;
-  const rawSize = bytes(src) + [...assets.values()].reduce((n, a) => n + a.length, 0), minSize = bytes(min);
+  // the shim is written minified already: it joins after the minifier, as text (base64) or, in deflate, as raw bytes
+  const min = withShim(bare, textShim(served));
+  const rawSize = bytes(src) + embedded().reduce((n, [, a]) => n + a.bytes.length, 0), minSize = bytes(min);
   // the minified page itself is a candidate too: on tiny pages the loader costs more than it saves
   const candidates = [{ name: 'minified only', html: min }];
-  if ($('optDeflate').checked) candidates.push({ name: 'deflate', html: await packDeflate(min) });
+  if ($('optDeflate').checked) candidates.push({ name: 'deflate', html: served.length ? await packDeflateFiles(bare, served) : await packDeflate(min) });
   if (id !== runId) return;
   let best = render(rawSize, minSize, candidates);
   if (!$('optRoad').checked) { setStatus('Kept: ' + best.name); return; }
@@ -349,9 +380,20 @@ async function run() {
 
 /* ---- Input and buttons --------------------------------------------------- */
 
+// One box per file beside the page: ticked, it goes inside the page
 function showFiles() {
-  const list = [...assets].map(([k, a]) => k + ' (' + a.length.toLocaleString('en') + ' B)');
-  $('files').textContent = list.length ? fileName + ' + ' + list.length + ' file(s): ' + list.join(', ') : '';
+  const box = $('files');
+  box.replaceChildren();
+  if (!assets.size) return;
+  box.append(fileName + ' +');
+  for (const [k, a] of assets) {
+    const label = document.createElement('label');
+    const input = Object.assign(document.createElement('input'), { type: 'checkbox', checked: a.on });
+    input.onchange = () => { a.on = input.checked; run(); };
+    label.title = isDoc(k) ? 'Unticked when loaded: a document file that pages rarely fetch' : 'Inside the page when ticked';
+    label.append(input, ' ' + k + ' (' + a.bytes.length.toLocaleString('en') + ' B)');
+    box.append(label);
+  }
 }
 
 // list: [{ path, file }], paths relative to what was dropped or opened. The page is the shallowest
@@ -364,7 +406,11 @@ async function loadFiles(list) {
   if (!main) { setStatus('No .html file among the files'); return; }
   const dir = main.path.slice(0, main.path.lastIndexOf('/') + 1);
   assets = new Map();
-  for (const f of list) if (f !== main && f.path.startsWith(dir)) assets.set(f.path.slice(dir.length), new Uint8Array(await f.file.arrayBuffer()));
+  for (const f of list) {
+    if (f === main || !f.path.startsWith(dir)) continue;
+    const key = f.path.slice(dir.length);
+    assets.set(key, { bytes: new Uint8Array(await f.file.arrayBuffer()), on: !isDoc(key) });
+  }
   fileName = main.file.name;
   $('src').value = await main.file.text();
   showFiles();
