@@ -7,7 +7,7 @@ Turns an HTML page, or a whole folder, into one file as small as possible: a `.h
 ## What it does
 
 1. **Inline** (when a folder or several files are given): `<script src>` and stylesheets go inside the page, images, audio, video and icons become `data:` URIs, and every other file is served to `fetch()` from inside the page (in deflate mode as raw bytes in a deflate stream of their own, not as base64). A page that only runs from a local server (because it fetches its data files) then runs with a double-click from `file://`.
-2. **Minify** with [html-minifier-terser](https://github.com/terser/html-minifier-terser): whitespace, comments, attribute quotes, redundant and boolean attributes; CSS with clean-css; JS with Terser (compress + mangle, never property mangling). **Aggressive** adds top-level mangling, `passes: 3` and `unsafe`.
+2. **Minify** with [html-minifier-terser](https://github.com/terser/html-minifier-terser): whitespace, comments, attribute quotes, boolean attributes; CSS with [csso](https://github.com/css/csso) (html-minifier's own clean-css breaks `:nth-child(1 of S)`); JS with Terser (compress + mangle, never property mangling). **Aggressive** adds top-level mangling, `passes: 3`, `unsafe`, and the removal of default attributes (`type=text`…), which breaks CSS or JS that selects on them (`input[type=text]`).
 3. **Pack**, and keep the smallest of:
    - **minified only** (best on tiny pages, where any loader costs more than it saves);
    - **deflate** (default): `CompressionStream("deflate-raw")` + base64, inflated by a one-line loader:
@@ -23,13 +23,13 @@ Outputs: the final HTML (copy, download), the `data:` URI (copy; only `%`, `#` a
 - Paste HTML into the input box, or
 - drop an `.html` file, several files, or a folder on it, or use **Open files…** / **Open folder…**.
 
-With several files, the page is the shallowest `.html` (`index.html` first); every file in its folder and below is listed with a box: ticked, it goes inside the page. Licence, readme, changelog and Markdown files start unticked.
+With several files, the page is the shallowest `.html` (`index.html` first). The files it links to (scripts, stylesheets, images) always go inside. Every other file is listed with a box, one per file in the page's folder and one per subfolder: ticked, it is served to `fetch()` from inside the page. The page's folder starts ticked, except licence, readme, changelog and Markdown files; subfolders start unticked (tools, older versions, other pages). A file is read only when it goes in, and hidden folders (`.git`…) are not even walked: a whole project folder such as [Tessera](https://github.com/VincentBounce/Tessera) packs in a few seconds into its page alone (3.1 MB → 613 KB).
 
 ## Examples
 
 | Example | Raw | Kept | Final HTML |
 |---|---:|---|---:|
-| [simple.html](examples/simple.html) | 974 B | minified only | 709 B |
+| [simple.html](examples/simple.html) | 974 B | minified only | 730 B |
 | [canvas.html](examples/canvas.html) | 6,251 B | deflate | 2,024 B |
 | [styled.html](examples/styled.html) | 1,522 B | deflate | 984 B |
 | [q1k3/](examples/q1k3) (folder: `index.html`, `l`, `m`) | 18,240 B | deflate | 18,591 B |

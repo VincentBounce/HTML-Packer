@@ -6,6 +6,8 @@
 <title>HTML Packer</title>
 <!-- html-minifier-terser browser bundle (UMD, global HTMLMinifier; terser and clean-css included) -->
 <script src="https://cdn.jsdelivr.net/npm/html-minifier-terser@7.2.0/dist/htmlminifier.umd.bundle.min.js"></script>
+<!-- csso (classic script, global csso): the CSS minifier; clean-css, bundled with html-minifier, breaks :nth-child(1 of S) -->
+<script src="https://cdn.jsdelivr.net/npm/csso@5.0.5/dist/csso.js"></script>
 <!-- qrcode-generator (classic script, global qrcode) -->
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.js"></script>
 <style>
@@ -49,7 +51,7 @@
 </head>
 <body>
 <header>
-  <h1>HTML Packer v0.3.4</h1> <!-- the version, bumped with each release; each release commit gets the tag v<version> -->
+  <h1>HTML Packer v0.4.0</h1> <!-- the version, bumped with each release; each release commit gets the tag v<version> -->
   <span>Paste or drop an HTML file, or a whole folder: its scripts, styles and files go inside the page; then minify, deflate or Roadroller; the smallest is kept.</span>
 </header>
 <main>
@@ -69,7 +71,7 @@
       <div class="row">
         <label title="CompressionStream deflate-raw + base64, inflated when the page opens"><input type="checkbox" id="optDeflate" checked> Deflate</label>
         <label title="Roadroller packer (slow: several seconds, in a worker)"><input type="checkbox" id="optRoad"> Roadroller</label>
-        <label title="Terser: toplevel mangle, passes:3, unsafe. May break code sharing global names across scripts or with onclick attributes"><input type="checkbox" id="optAggr"> Aggressive</label>
+        <label title="Terser: toplevel mangle, passes:3, unsafe; and removal of default attributes (type=text…). May break code sharing global names across scripts or with onclick attributes, and CSS or JS selecting on those attributes"><input type="checkbox" id="optAggr"> Aggressive</label>
         <button id="run" class="primary" style="margin-left:auto">Compact</button>
       </div>
       <div class="row"><span id="status" class="note"></span><progress id="prog" max="1" value="0" hidden></progress></div>
@@ -110,7 +112,7 @@ const ROADROLLER_URL = 'https://cdn.jsdelivr.net/npm/roadroller@2.1.0/+esm';
 const bytes = s => new TextEncoder().encode(s).length;
 
 let fileName = 'page.html';
-let assets = new Map(); // files beside the page: path relative to the page's folder → { bytes: Uint8Array, on: embedded }
+let assets = new Map(); // files beside the page: path relative to the page's folder → { file, on: served to fetch(), bytes once read }
 let runId = 0;        // each run gets an id; results of a stale run are dropped
 let worker = null;    // the Roadroller worker of the current run
 
@@ -133,8 +135,15 @@ function assetKey(ref) {
 
 const embedded = () => [...assets].filter(([, a]) => a.on);
 
-// Files nobody fetches by default: unticked when loaded (the box can tick them back)
+// A file is read only when it goes in (a project folder may hold megabytes the page never uses)
+const bytesOf = async a => a.bytes ??= new Uint8Array(await a.file.arrayBuffer());
+
+// Ticked when loaded: the files in the page's own folder, except documents (licence, readme…).
+// Subfolders start unticked: tools, older versions, other pages; a file the page links to is taken anyway.
 const isDoc = path => /(^|\/)(license|licence|readme|changelog|copying)(\.[^/]*)?$|\.md$/i.test(path);
+const tickedFirst = key => !key.includes('/') && !isDoc(key);
+
+const size = n => n < 1000 ? n + ' B' : (n / (n < 1e6 ? 1e3 : 1e6)).toLocaleString('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + (n < 1e6 ? ' KB' : ' MB');
 
 // The fetch shim, put first in the page when files are left over: fetch() of one of them answers from the page.
 // files: { key: [mime, base64] }, or with binary: { key: [mime, start, end] } in the inflated bytes B (see packDeflateFiles)
@@ -154,14 +163,15 @@ function withShim(html, shim) {
   return doctype + '<script>' + shim + '</' + 'script>' + rest;
 }
 
-// Scripts and stylesheets go inline, media become data: URIs; returns the page and the files left for the fetch shim
-function inlineAssets(html) {
+// Scripts and stylesheets go inline, media become data: URIs (the files the page links to, ticked or not);
+// returns the page, those files, and the ticked files left for the fetch shim
+async function inlineAssets(html) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const used = new Set();
-  const take = ref => { const k = assetKey(ref || ''); if (k != null && assets.get(k)?.on) { used.add(k); return [k, assets.get(k).bytes]; } };
+  const take = async ref => { const k = assetKey(ref || ''), a = k != null && assets.get(k); if (a) { used.add(k); return [k, await bytesOf(a)]; } };
   const text = u8 => new TextDecoder().decode(u8);
   for (const s of doc.querySelectorAll('script[src]')) {
-    const a = take(s.getAttribute('src'));
+    const a = await take(s.getAttribute('src'));
     if (!a) continue;
     s.removeAttribute('src');
     s.textContent = text(a[1]).replace(/<\/(script)/gi, '<\\/$1');
@@ -169,7 +179,7 @@ function inlineAssets(html) {
     if (s.defer && s.type !== 'module') { s.removeAttribute('defer'); doc.body.append(s); }
   }
   for (const l of doc.querySelectorAll('link[rel~=stylesheet][href]')) {
-    const a = take(l.getAttribute('href'));
+    const a = await take(l.getAttribute('href'));
     if (!a) continue;
     const style = doc.createElement('style');
     if (l.media) style.media = l.media;
@@ -178,16 +188,29 @@ function inlineAssets(html) {
   }
   for (const m of doc.querySelectorAll('img[src], audio[src], video[src], source[src], link[rel~=icon][href]')) {
     const attr = m.hasAttribute('src') ? 'src' : 'href';
-    const a = take(m.getAttribute(attr));
+    const a = await take(m.getAttribute(attr));
     if (a) m.setAttribute(attr, 'data:' + mime(a[0]) + ';base64,' + base64(a[1]));
   }
   const doctype = doc.doctype ? '<!DOCTYPE ' + doc.doctype.name + '>' : '';
-  return { html: doctype + doc.documentElement.outerHTML, served: embedded().map(([k]) => k).filter(k => !used.has(k)) };
+  const served = embedded().map(([k]) => k).filter(k => !used.has(k));
+  for (const k of served) await bytesOf(assets.get(k));
+  return { html: doctype + doc.documentElement.outerHTML, used: [...used], served };
 }
 
 /* ---- Minify ------------------------------------------------------------ */
 
-// html-minifier-terser options; "aggressive" only changes Terser (never property mangling)
+// CSS by csso rather than html-minifier's clean-css, which glues ":nth-child(1 of :not([hidden]))" into "1of:",
+// so the browser drops the whole rule (Tessera lost 7 of its 9 such rules, its +10k button showed through).
+// type: 'inline' for a style attribute, 'media' for a media attribute, none for a stylesheet.
+function minifyCSS(text, type) {
+  try {
+    return type === 'inline' ? csso.minifyBlock(text).css : type === 'media' ? text.trim() : csso.minify(text).css;
+  } catch { return text; }
+}
+
+// html-minifier-terser options. "Aggressive" adds what can break a page: Terser's toplevel mangle, passes:3 and
+// unsafe (never property mangling), and removeRedundantAttributes, which drops type=text and the like that CSS
+// or JS may select on (input[type=text]: Tessera's number field lost its style)
 function minifyOptions(aggressive) {
   const terser = aggressive
     ? { compress: { passes: 3, unsafe: true }, mangle: { toplevel: true } }
@@ -196,14 +219,14 @@ function minifyOptions(aggressive) {
     collapseWhitespace: true,
     removeComments: true,
     removeAttributeQuotes: true,
-    removeRedundantAttributes: true,
+    removeRedundantAttributes: aggressive,
     collapseBooleanAttributes: true,
     useShortDoctype: true,
     removeScriptTypeAttributes: true,
     removeStyleLinkTypeAttributes: true,
     sortAttributes: true,
     sortClassName: true,
-    minifyCSS: true,
+    minifyCSS,
     minifyJS: terser,
   };
 }
@@ -319,10 +342,9 @@ const QR_MAX = 2953; // bytes held by the largest QR code (version 40, byte mode
 
 function showQr(uri) {
   const n = bytes(uri);
-  const kb = x => (x / 1000).toLocaleString('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' KB';
   // shown in place of the QR code; the button's tooltip gives the detail
   const why = typeof qrcode === 'undefined' ? '[QR code library not loaded]'
-    : n > QR_MAX ? '[' + kb(n - QR_MAX) + ' too many to fit a QR code]' : '';
+    : n > QR_MAX ? '[' + size(n - QR_MAX) + ' too many to fit a QR code]' : '';
   const canvas = $('qr');
   canvas.hidden = !!why;
   $('dlQr').disabled = !!why;
@@ -352,7 +374,8 @@ async function run() {
   const id = ++runId;
   stopWorker();
   setStatus('Minifying…');
-  const { html: page, served } = assets.size ? inlineAssets(src) : { html: src, served: [] };
+  const { html: page, used, served } = assets.size ? await inlineAssets(src) : { html: src, used: [], served: [] };
+  if (id !== runId) return;
   let bare;
   try {
     bare = await HTMLMinifier.minify(page, minifyOptions($('optAggr').checked));
@@ -360,7 +383,7 @@ async function run() {
   if (id !== runId) return;
   // the shim is written minified already: it joins after the minifier, as text (base64) or, in deflate, as raw bytes
   const min = withShim(bare, textShim(served));
-  const rawSize = bytes(src) + embedded().reduce((n, [, a]) => n + a.bytes.length, 0), minSize = bytes(min);
+  const rawSize = bytes(src) + [...used, ...served].reduce((n, k) => n + assets.get(k).file.size, 0), minSize = bytes(min);
   // the minified page itself is a candidate too: on tiny pages the loader costs more than it saves
   const candidates = [{ name: 'minified only', html: min }];
   if ($('optDeflate').checked) candidates.push({ name: 'deflate', html: served.length ? await packDeflateFiles(bare, served) : await packDeflate(min) });
@@ -384,24 +407,33 @@ async function run() {
 
 /* ---- Input and buttons --------------------------------------------------- */
 
-// One box per file beside the page: ticked, it goes inside the page
+// One box per file beside the page, and one per subfolder (all its files): ticked, it goes inside the page
 function showFiles() {
   const box = $('files');
   box.replaceChildren();
   if (!assets.size) return;
   box.append(fileName + ' +');
+  const groups = new Map();
   for (const [k, a] of assets) {
+    const g = k.includes('/') ? k.slice(0, k.indexOf('/') + 1) : k;
+    groups.set(g, [...(groups.get(g) || []), a]);
+  }
+  for (const [g, files] of groups) {
     const label = document.createElement('label');
-    const input = Object.assign(document.createElement('input'), { type: 'checkbox', checked: a.on });
-    input.onchange = () => { a.on = input.checked; run(); };
-    label.title = isDoc(k) ? 'Unticked when loaded: a document file that pages rarely fetch' : 'Inside the page when ticked';
-    label.append(input, ' ' + k + ' (' + a.bytes.length.toLocaleString('en') + ' B)');
+    const input = Object.assign(document.createElement('input'), { type: 'checkbox', checked: files.every(a => a.on) });
+    input.indeterminate = !input.checked && files.some(a => a.on);
+    input.onchange = () => { files.forEach(a => a.on = input.checked); run(); };
+    const total = size(files.reduce((n, a) => n + a.file.size, 0));
+    label.title = g.endsWith('/') ? 'Unticked when loaded: a subfolder (tools, older versions, other pages). The files the page links to are inside anyway'
+      : isDoc(g) ? 'Unticked when loaded: a document file that pages rarely fetch' : 'Inside the page when ticked';
+    label.append(input, ' ' + g + ' (' + (g.endsWith('/') ? files.length + ' files, ' : '') + total + ')');
     box.append(label);
   }
 }
 
 // list: [{ path, file }], paths relative to what was dropped or opened. The page is the shallowest
-// .html (index.html first); the files in its folder and below become its assets; hidden files are skipped.
+// .html (index.html first); the files in its folder and below become its assets (read only when they go in);
+// hidden files are skipped.
 async function loadFiles(list) {
   list = list.filter(f => !f.path.split('/').some(p => p.startsWith('.')));
   const depth = f => f.path.split('/').length;
@@ -413,7 +445,7 @@ async function loadFiles(list) {
   for (const f of list) {
     if (f === main || !f.path.startsWith(dir)) continue;
     const key = f.path.slice(dir.length);
-    assets.set(key, { bytes: new Uint8Array(await f.file.arrayBuffer()), on: !isDoc(key) });
+    assets.set(key, { file: f.file, on: tickedFirst(key) });
   }
   fileName = main.file.name;
   $('src').value = await main.file.text();
@@ -423,6 +455,7 @@ async function loadFiles(list) {
 
 // A dropped folder is walked through its entries (DataTransfer.files lists no folder content)
 async function entryFiles(entry, out) {
+  if (entry.name.startsWith('.')) return out; // hidden: .git and the like are not even walked
   if (entry.isFile) out.push({ path: entry.fullPath.slice(1), file: await new Promise((ok, ko) => entry.file(ok, ko)) });
   else if (entry.isDirectory) {
     const reader = entry.createReader();
