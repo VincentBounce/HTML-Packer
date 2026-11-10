@@ -51,7 +51,7 @@
 </head>
 <body>
 <header>
-  <h1>HTML Packer v0.4.1</h1> <!-- the version, bumped with each release; each release commit gets the tag v<version> -->
+  <h1>HTML Packer v0.4.2</h1> <!-- the version, bumped with each release; each release commit gets the tag v<version> -->
   <span>Paste or drop an HTML file, or a whole folder: its scripts, styles and files go inside the page; then minify, deflate or Roadroller; the smallest is kept.</span>
 </header>
 <main>
@@ -339,7 +339,9 @@ function render(rawSize, minSize, candidates) {
 /* ---- QR code of the data: URI ------------------------------------------ */
 
 const QR_MAX = 2953; // bytes held by the largest QR code (version 40, byte mode, error correction L)
-const URL_MAX = 2097152; // characters in the longest URL Chrome opens (2 MiB; measured: one more and it aborts)
+// characters Chrome's address bar keeps from a paste (measured with Tessera: location.href.length was 512,000
+// for a 613,019-character URI). A link or a navigation goes further, up to 2 MiB (2,097,152), but a paste stops here.
+const PASTE_MAX = 512000;
 
 function showQr(uri) {
   const n = bytes(uri);
@@ -352,7 +354,7 @@ function showQr(uri) {
   $('dlQr').title = !why ? 'PNG of the QR code' : n > QR_MAX
     ? 'No QR code: the URI is ' + n.toLocaleString('en') + ' bytes, a QR code holds ' + QR_MAX.toLocaleString('en') + ' at most' : 'No QR code: ' + why;
   // under the URI, what stops it first: the address bar, else the QR code
-  $('uriNote').textContent = uri.length > URL_MAX ? '[' + size(uri.length - URL_MAX) + ' too many to paste as a URL: Chrome opens 2 MiB at most]' : why;
+  $('uriNote').textContent = uri.length > PASTE_MAX ? '[' + size(uri.length - PASTE_MAX) + " too many to paste as a URL: Chrome's address bar keeps 512,000 characters]" : why;
   if (why) return;
   qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
   const qr = qrcode(0, 'L');
