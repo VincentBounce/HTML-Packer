@@ -34,7 +34,8 @@
   button:disabled { opacity: .45; cursor: default; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
-  .note { color: var(--muted); font-size: 12px; min-height: 1.4em; }
+  .note { color: var(--muted); font-size: 12px; }
+  .note:empty { display: none; } /* an empty note takes no room (no line, no gap) */
   progress { width: 140px; height: 8px; }
   table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
   td, th { padding: 2px 6px; text-align: right; border-bottom: 1px solid var(--line); }
