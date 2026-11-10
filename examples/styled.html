@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Styled cards</title>
+  <style type="text/css">
+    /* Layout */
+    :root { --accent: #3366cc; --radius: 10px; }
+    body {
+      font-family: Georgia, serif;
+      margin: 0;
+      padding: 24px;
+      background: linear-gradient(180deg, #ffffff 0%, #eef2f7 100%);
+      color: #222222;
+    }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .card {
+      border: 1px solid #cccccc;
+      border-radius: var(--radius);
+      padding: 16px;
+      background-color: #ffffff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    }
+    .card h2 { margin: 0 0 8px 0; color: var(--accent); font-size: 20px; }
+    .card p  { margin: 0; line-height: 1.5; }
+    .card.highlight { border-color: var(--accent); background-color: #f5f8ff; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #ffcc00; font-size: 12px; }
+    @media (max-width: 400px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1 style="color: #333333; text-align: center;">Three cards</h1>
+  <div class="grid">
+    <div class="card">
+      <h2>First</h2>
+      <p>Some text inside the <b>first</b> card. <span class="badge">new</span></p>
+    </div>
+    <div class="card highlight">
+      <h2>Second</h2>
+      <p>The highlighted   card, with   extra   spaces.</p>
+    </div>
+    <div class="card">
+      <h2>Third</h2>
+      <p>Last card: 50% done #3.</p>
+    </div>
+  </div>
+</body>
+</html>

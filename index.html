@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HTML Packer</title>
+<!-- html-minifier-terser browser bundle (UMD, global HTMLMinifier; terser and clean-css included) -->
+<script src="https://cdn.jsdelivr.net/npm/html-minifier-terser@7.2.0/dist/htmlminifier.umd.bundle.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --line: #dde1e6; --text: #1d232b; --muted: #6b7480;
+    --accent: #2f6fde; --good: #1f8a4c; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, sans-serif;
+         display: flex; flex-direction: column; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; }
+  header span { color: var(--muted); font-size: 12px; }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px 16px; }
+  .col { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  .grow { flex: 1; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .label { font-weight: 600; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-right: auto; }
+  textarea { width: 100%; flex: 1; min-height: 60px; resize: none; border: 1px solid var(--line); border-radius: 4px; padding: 6px;
+             font: 12px/1.35 var(--mono); color: var(--text); background: #fbfcfd; }
+  #src.drag { border-color: var(--accent); background: #eef4ff; }
+  button { font: inherit; padding: 4px 12px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--text); cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  .note { color: var(--muted); font-size: 12px; min-height: 1.4em; }
+  progress { width: 140px; height: 8px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  td, th { padding: 2px 6px; text-align: right; border-bottom: 1px solid var(--line); }
+  td:first-child, th:first-child { text-align: left; }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; }
+  tr.win td { color: var(--good); font-weight: 600; }
+  iframe { flex: 1; min-height: 120px; width: 100%; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>HTML Packer</h1>
+  <span>Paste or drop an HTML file, or a whole folder: its scripts, styles and files go inside the page; then minify, deflate or Roadroller; the smallest is kept.</span>
+</header>
+<main>
+  <div class="col">
+    <div class="card grow">
+      <div class="row">
+        <span class="label">Input</span>
+        <button id="open" title="One .html file, or an .html file with the files it uses">Open files…</button>
+        <button id="openDir" title="A folder: its index.html (or shallowest .html) with every file beside it">Open folder…</button>
+        <input id="file" type="file" multiple hidden>
+        <input id="dir" type="file" webkitdirectory hidden>
+      </div>
+      <span id="files" class="note"></span>
+      <textarea id="src" spellcheck="false" placeholder="Paste HTML here, or drop an .html file or a folder"></textarea>
+    </div>
+    <div class="card">
+      <div class="row">
+        <label title="CompressionStream deflate-raw + base64, inflated when the page opens"><input type="checkbox" id="optDeflate" checked> Deflate</label>
+        <label title="Roadroller packer (slow: several seconds, in a worker)"><input type="checkbox" id="optRoad"> Roadroller</label>
+        <label title="Terser: toplevel mangle, passes:3, unsafe. May break code sharing global names across scripts or with onclick attributes"><input type="checkbox" id="optAggr"> Aggressive</label>
+        <button id="run" class="primary" style="margin-left:auto">Compact</button>
+      </div>
+      <div class="row"><span id="status" class="note"></span><progress id="prog" max="1" value="0" hidden></progress></div>
+      <table id="sizes">
+        <thead><tr><th>Step</th><th>HTML (bytes)</th><th>URI (bytes)</th><th>Ratio</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="col">
+    <div class="card grow">
+      <div class="row">
+        <span class="label">Final HTML</span>
+        <button id="copyHtml" disabled>Copy</button>
+        <button id="download" disabled>Download</button>
+      </div>
+      <textarea id="outHtml" readonly spellcheck="false"></textarea>
+    </div>
+    <div class="card">
+      <div class="row">
+        <span class="label">data: URI</span>
+        <button id="copyUri" disabled>Copy</button>
+      </div>
+      <textarea id="outUri" readonly spellcheck="false" style="flex:none;height:60px"></textarea>
+    </div>
+    <div class="card grow">
+      <div class="row"><span class="label">Preview (sandboxed iframe)</span></div>
+      <iframe id="preview" sandbox="allow-scripts allow-pointer-lock"></iframe>
+    </div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const ROADROLLER_URL = 'https://cdn.jsdelivr.net/npm/roadroller@2.1.0/+esm';
+const bytes = s => new TextEncoder().encode(s).length;
+
+let fileName = 'page.html';
+let assets = new Map(); // files beside the page: path relative to the page's folder → Uint8Array
+let runId = 0;        // each run gets an id; results of a stale run are dropped
+let worker = null;    // the Roadroller worker of the current run
+
+/* ---- Inline the page's files -------------------------------------------- */
+
+const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+  ico: 'image/x-icon', mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', mp4: 'video/mp4', webm: 'video/webm',
+  json: 'application/json', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', html: 'text/html', htm: 'text/html',
+  txt: 'text/plain', wasm: 'application/wasm', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf' };
+const mime = path => MIME[(path.match(/\.([^./]+)$/) || [])[1]?.toLowerCase()] || 'application/octet-stream';
+
+// A relative URL → its asset key (path from the page's folder); null for absolute URLs.
+// The packed page's fetch shim resolves the very same way (fake origin http://a/).
+function assetKey(ref) {
+  try {
+    const u = new URL(ref, 'http://a/');
+    return u.origin === 'http://a' ? decodeURIComponent(u.pathname.slice(1)) : null;
+  } catch { return null; }
+}
+
+// Prepended to the page when files are left over: fetch() of one of them answers from the page itself
+const fetchShim = files => '{let A=' + JSON.stringify(files) + ',F=fetch;fetch=(r,o)=>{let u=new URL(r.url||r,"http://a/"),' +
+  'a=u.origin=="http://a"&&A[decodeURIComponent(u.pathname.slice(1))];return a?Promise.resolve(new Response(' +
+  'Uint8Array.from(atob(a[1]),c=>c.charCodeAt(0)),{headers:{"Content-Type":a[0]}})):F(r,o)}}';
+
+// Scripts and stylesheets go inline, media become data: URIs, every other file is served by the fetch shim
+function inlineAssets(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const used = new Set();
+  const take = ref => { const k = assetKey(ref || ''); if (k != null && assets.has(k)) { used.add(k); return [k, assets.get(k)]; } };
+  const text = u8 => new TextDecoder().decode(u8);
+  for (const s of doc.querySelectorAll('script[src]')) {
+    const a = take(s.getAttribute('src'));
+    if (!a) continue;
+    s.removeAttribute('src');
+    s.textContent = text(a[1]).replace(/<\/(script)/gi, '<\\/$1');
+    // an inline classic script ignores defer: run it after parsing, as before
+    if (s.defer && s.type !== 'module') { s.removeAttribute('defer'); doc.body.append(s); }
+  }
+  for (const l of doc.querySelectorAll('link[rel~=stylesheet][href]')) {
+    const a = take(l.getAttribute('href'));
+    if (!a) continue;
+    const style = doc.createElement('style');
+    if (l.media) style.media = l.media;
+    style.textContent = text(a[1]).replace(/<\/(style)/gi, '<\\/$1');
+    l.replaceWith(style);
+  }
+  for (const m of doc.querySelectorAll('img[src], audio[src], video[src], source[src], link[rel~=icon][href]')) {
+    const attr = m.hasAttribute('src') ? 'src' : 'href';
+    const a = take(m.getAttribute(attr));
+    if (a) m.setAttribute(attr, 'data:' + mime(a[0]) + ';base64,' + base64(a[1]));
+  }
+  const served = [...assets.keys()].filter(k => !used.has(k));
+  if (served.length) {
+    const shim = doc.createElement('script');
+    shim.textContent = fetchShim(Object.fromEntries(served.map(k => [k, [mime(k), base64(assets.get(k))]])));
+    doc.head.prepend(shim);
+  }
+  const doctype = doc.doctype ? '<!DOCTYPE ' + doc.doctype.name + '>' : '';
+  return doctype + doc.documentElement.outerHTML;
+}
+
+/* ---- Minify ------------------------------------------------------------ */
+
+// html-minifier-terser options; "aggressive" only changes Terser (never property mangling)
+function minifyOptions(aggressive) {
+  const terser = aggressive
+    ? { compress: { passes: 3, unsafe: true }, mangle: { toplevel: true } }
+    : { compress: true, mangle: true };
+  return {
+    collapseWhitespace: true,
+    removeComments: true,
+    removeAttributeQuotes: true,
+    removeRedundantAttributes: true,
+    collapseBooleanAttributes: true,
+    useShortDoctype: true,
+    removeScriptTypeAttributes: true,
+    removeStyleLinkTypeAttributes: true,
+    sortAttributes: true,
+    sortClassName: true,
+    minifyCSS: true,
+    minifyJS: terser,
+  };
+}
+
+/* ---- Packers ----------------------------------------------------------- */
+
+function base64(u8) {
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+async function packDeflate(html) {
+  const stream = new Blob([html]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+  const b64 = base64(new Uint8Array(await new Response(stream).arrayBuffer()));
+  return '<script>(async()=>document.write(await new Response((await fetch("data:;base64,' + b64 +
+    '")).body.pipeThrough(new DecompressionStream("deflate-raw"))).text()))()</' + 'script>';
+}
+
+// Roadroller runs in a Web Worker made from a Blob, so the UI stays responsive.
+// A classic worker with a dynamic import(): from file:// Chrome refuses Blob *module* workers.
+const WORKER_SRC = `
+onmessage = async ({ data: html }) => {
+  try {
+    const { Packer } = await import('${ROADROLLER_URL}');
+    const packer = new Packer([{ data: html, type: 'text', action: 'write' }], {});
+    await packer.optimize(1, info => { postMessage({ progress: info.passRatio ?? 0, pass: info.pass, best: info.bestSize }); });
+    const { firstLine, secondLine } = packer.makeDecoder();
+    postMessage({ done: firstLine + secondLine });
+  } catch (e) { postMessage({ error: String(e && e.message || e) }); }
+};`;
+
+// Roadroller's document.write runs while the page is still parsing (unlike the async deflate loader):
+// a written doctype would come too late (quirks mode) and the loader <script> would stay in the DOM.
+// So the doctype goes before the script, and the script removes itself.
+async function packRoadroller(html, onProgress) {
+  const doctype = (html.match(/^<!doctype[^>]*>/i) || [''])[0];
+  const code = await runRoadroller(html.slice(doctype.length), onProgress);
+  return doctype + '<script>' + code + ';document.currentScript.remove()</' + 'script>';
+}
+
+function runRoadroller(html, onProgress) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' }));
+    worker = new Worker(url);
+    URL.revokeObjectURL(url);
+    worker.onerror = e => reject(new Error(e.message || 'could not load the Roadroller worker'));
+    worker.onmessage = ({ data }) => {
+      if (data.error) reject(new Error(data.error));
+      else if (data.done) resolve(data.done);
+      else onProgress(data);
+    };
+    worker.postMessage(html);
+  });
+}
+
+function stopWorker() { if (worker) { worker.terminate(); worker = null; } }
+
+/* ---- Outputs ----------------------------------------------------------- */
+
+// data: URI, percent-encoding only what breaks it: %, # and line breaks
+const dataUri = html => 'data:text/html,' + html.replace(/%/g, '%25').replace(/#/g, '%23').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+
+function setStatus(text, ratio) {
+  $('status').textContent = text;
+  $('prog').hidden = ratio == null;
+  if (ratio != null) $('prog').value = ratio;
+}
+
+// rows: [{ name, html }], the smallest final candidate wins
+function render(rawSize, minSize, candidates) {
+  const ratio = n => (100 * n / rawSize).toFixed(1) + ' %';
+  const tb = $('sizes').tBodies[0];
+  tb.innerHTML = '';
+  const row = (name, h, u, cls) => {
+    const tr = tb.insertRow();
+    if (cls) tr.className = cls;
+    [name, h.toLocaleString('en'), u == null ? '' : u.toLocaleString('en'), ratio(h)].forEach(t => tr.insertCell().textContent = t);
+  };
+  row('Raw', rawSize);
+  row('Minified', minSize);
+  const sized = candidates.map(c => ({ ...c, size: bytes(c.html), uri: dataUri(c.html) }));
+  const best = sized.reduce((a, b) => (b.size < a.size ? b : a));
+  for (const c of sized) row('Final · ' + c.name + (c === best ? ' ✓' : ''), c.size, bytes(c.uri), c === best ? 'win' : '');
+  $('outHtml').value = best.html;
+  $('outUri').value = best.uri;
+  $('preview').srcdoc = best.html;
+  ['copyHtml', 'download', 'copyUri'].forEach(id => $(id).disabled = false);
+  return best;
+}
+
+/* ---- Run --------------------------------------------------------------- */
+
+async function run() {
+  const src = $('src').value;
+  if (!src.trim()) return;
+  const id = ++runId;
+  stopWorker();
+  setStatus('Minifying…');
+  const page = assets.size ? inlineAssets(src) : src;
+  let min;
+  try {
+    min = await HTMLMinifier.minify(page, minifyOptions($('optAggr').checked));
+  } catch (e) { if (id === runId) setStatus('Minify error: ' + (e.message || e)); return; }
+  if (id !== runId) return;
+  const rawSize = bytes(src) + [...assets.values()].reduce((n, a) => n + a.length, 0), minSize = bytes(min);
+  // the minified page itself is a candidate too: on tiny pages the loader costs more than it saves
+  const candidates = [{ name: 'minified only', html: min }];
+  if ($('optDeflate').checked) candidates.push({ name: 'deflate', html: await packDeflate(min) });
+  if (id !== runId) return;
+  let best = render(rawSize, minSize, candidates);
+  if (!$('optRoad').checked) { setStatus('Kept: ' + best.name); return; }
+  setStatus('Roadroller: loading…', 0);
+  const t0 = performance.now();
+  try {
+    const html = await packRoadroller(min, p => {
+      if (id === runId) setStatus('Roadroller: ' + (p.pass || 'optimizing') + (p.best ? ' · best ' + p.best + ' B' : ''), p.progress);
+    });
+    if (id !== runId) return;
+    candidates.push({ name: 'Roadroller', html });
+    best = render(rawSize, minSize, candidates);
+    setStatus('Roadroller: ' + ((performance.now() - t0) / 1000).toFixed(1) + ' s. Kept: ' + best.name);
+  } catch (e) {
+    if (id === runId) setStatus('Roadroller error: ' + e.message + '. Kept: ' + best.name);
+  } finally { if (id === runId) stopWorker(); }
+}
+
+/* ---- Input and buttons --------------------------------------------------- */
+
+function showFiles() {
+  const list = [...assets].map(([k, a]) => k + ' (' + a.length.toLocaleString('en') + ' B)');
+  $('files').textContent = list.length ? fileName + ' + ' + list.length + ' file(s): ' + list.join(', ') : '';
+}
+
+// list: [{ path, file }], paths relative to what was dropped or opened. The page is the shallowest
+// .html (index.html first); the files in its folder and below become its assets; hidden files are skipped.
+async function loadFiles(list) {
+  list = list.filter(f => !f.path.split('/').some(p => p.startsWith('.')));
+  const depth = f => f.path.split('/').length;
+  const isIndex = f => /(^|\/)index\.html?$/i.test(f.path);
+  const main = list.filter(f => /\.html?$/i.test(f.path)).sort((a, b) => depth(a) - depth(b) || isIndex(b) - isIndex(a))[0];
+  if (!main) { setStatus('No .html file among the files'); return; }
+  const dir = main.path.slice(0, main.path.lastIndexOf('/') + 1);
+  assets = new Map();
+  for (const f of list) if (f !== main && f.path.startsWith(dir)) assets.set(f.path.slice(dir.length), new Uint8Array(await f.file.arrayBuffer()));
+  fileName = main.file.name;
+  $('src').value = await main.file.text();
+  showFiles();
+  run();
+}
+
+// A dropped folder is walked through its entries (DataTransfer.files lists no folder content)
+async function entryFiles(entry, out) {
+  if (entry.isFile) out.push({ path: entry.fullPath.slice(1), file: await new Promise((ok, ko) => entry.file(ok, ko)) });
+  else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    for (let batch; (batch = await new Promise((ok, ko) => reader.readEntries(ok, ko))).length;)
+      for (const e of batch) await entryFiles(e, out);
+  }
+  return out;
+}
+
+const pickedFiles = input => [...input.files].map(file => ({ path: file.webkitRelativePath || file.name, file }));
+
+const src = $('src');
+src.addEventListener('dragover', e => { e.preventDefault(); src.classList.add('drag'); });
+src.addEventListener('dragleave', () => src.classList.remove('drag'));
+src.addEventListener('drop', async e => {
+  e.preventDefault();
+  src.classList.remove('drag');
+  const entries = [...e.dataTransfer.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  const list = [];
+  for (const entry of entries) await entryFiles(entry, list);
+  loadFiles(list);
+});
+src.addEventListener('paste', () => { fileName = 'page.html'; assets = new Map(); showFiles(); setTimeout(run, 0); });
+src.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) run(); });
+$('open').onclick = () => $('file').click();
+$('openDir').onclick = () => $('dir').click();
+$('file').onchange = e => loadFiles(pickedFiles(e.target));
+$('dir').onchange = e => loadFiles(pickedFiles(e.target));
+$('run').onclick = run;
+['optDeflate', 'optRoad', 'optAggr'].forEach(id => $(id).onchange = run);
+
+async function copy(text, btn) {
+  await navigator.clipboard.writeText(text);
+  const t = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => btn.textContent = t, 1000);
+}
+$('copyHtml').onclick = e => copy($('outHtml').value, e.target);
+$('copyUri').onclick = e => copy($('outUri').value, e.target);
+$('download').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([$('outHtml').value], { type: 'text/html' }));
+  a.download = fileName.replace(/\.html?$/i, '') + '.min.html';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+</script>
+</body>
+</html>
