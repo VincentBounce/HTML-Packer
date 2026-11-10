@@ -51,7 +51,7 @@
 </head>
 <body>
 <header>
-  <h1>HTML Packer v0.4.8</h1> <!-- the version, bumped with each release; each release commit gets the tag v<version> -->
+  <h1>HTML Packer v0.4.9</h1> <!-- the version, bumped with each release; each release commit gets the tag v<version> -->
   <span>Paste or drop an HTML file, or a whole folder: its scripts, styles and files go inside the page; then minify, deflate or Roadroller; the smallest is kept.</span>
 </header>
 <main>
@@ -358,23 +358,23 @@ const PASTE_LIMITS = [
 // (the limit itself as an exact count: 32 MiB is 33,554,432 characters, which a rounded size would blur)
 const limitLine = (n, max, what, unit) => {
   const limit = max.toLocaleString('en') + ' ' + unit + ' at most';
-  return n > max ? '[' + size(n - max) + ' too many ' + what + ' (' + limit + ')]' : '[OK ' + what + ': ' + size(max - n) + ' to spare (' + limit + ')]';
+  return n > max ? size(n - max) + ' too many ' + what + ' (' + limit + ')' : 'OK ' + what + ': ' + size(max - n) + ' to spare (' + limit + ')';
 };
 
 function showQr(uri) {
   const n = bytes(uri);
   // no QR code when its library is missing or the URI is too long; the button's tooltip gives the detail
-  const why = typeof qrcode === 'undefined' ? '[QR code library not loaded]' : n > QR_MAX ? 'too long' : '';
+  const why = typeof qrcode === 'undefined' ? 'QR code library not loaded' : n > QR_MAX ? 'too long' : '';
   const canvas = $('qr');
   canvas.hidden = !!why;
   $('dlQr').disabled = !!why;
   $('dlQr').title = !why ? 'PNG of the QR code' : n > QR_MAX
     ? 'No QR code: the URI is ' + n.toLocaleString('en') + ' bytes, a QR code holds ' + QR_MAX.toLocaleString('en') + ' at most' : 'No QR code: the QR code library did not load';
-  // under the URI, every limit: the QR code's, then each browser's
+  // under the URI, every limit: the QR code's, then each browser's; a list, each line ending with ";", the last with "."
   $('uriNote').textContent = [
     typeof qrcode === 'undefined' ? why : limitLine(n, QR_MAX, 'to fit a QR code', 'bytes'),
     ...PASTE_LIMITS.map(l => limitLine(uri.length, l.max, 'to paste as a URL in ' + l.browsers, 'characters')),
-  ].join('\n');
+  ].join(';\n') + '.';
   if (why) return;
   qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
   const qr = qrcode(0, 'L');
