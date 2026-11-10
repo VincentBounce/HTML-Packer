@@ -6,6 +6,8 @@
 <title>HTML Packer</title>
 <!-- html-minifier-terser browser bundle (UMD, global HTMLMinifier; terser and clean-css included) -->
 <script src="https://cdn.jsdelivr.net/npm/html-minifier-terser@7.2.0/dist/htmlminifier.umd.bundle.min.js"></script>
+<!-- qrcode-generator (classic script, global qrcode) -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.js"></script>
 <style>
   :root {
     --bg: #f6f7f9; --panel: #fff; --line: #dde1e6; --text: #1d232b; --muted: #6b7480;
@@ -39,6 +41,7 @@
   td:first-child, th:first-child { text-align: left; }
   th { font-weight: 600; color: var(--muted); font-size: 12px; }
   tr.win td { color: var(--good); font-weight: 600; }
+  #qr { align-self: flex-start; width: 160px; image-rendering: pixelated; }
   iframe { flex: 1; min-height: 120px; width: 100%; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
   @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
 </style>
@@ -88,8 +91,11 @@
       <div class="row">
         <span class="label">data: URI</span>
         <button id="copyUri" disabled>Copy</button>
+        <button id="dlQr" disabled>Download QR</button>
       </div>
       <textarea id="outUri" readonly spellcheck="false" style="flex:none;height:60px"></textarea>
+      <canvas id="qr" hidden></canvas>
+      <span id="qrNote" class="note"></span>
     </div>
     <div class="card grow">
       <div class="row"><span class="label">Preview (sandboxed iframe)</span></div>
@@ -272,8 +278,37 @@ function render(rawSize, minSize, candidates) {
   $('outHtml').value = best.html;
   $('outUri').value = best.uri;
   $('preview').srcdoc = best.html;
+  showQr(best.uri);
   ['copyHtml', 'download', 'copyUri'].forEach(id => $(id).disabled = false);
   return best;
+}
+
+/* ---- QR code of the data: URI ------------------------------------------ */
+
+const QR_MAX = 2953; // bytes held by the largest QR code (version 40, byte mode, error correction L)
+
+function showQr(uri) {
+  const n = bytes(uri);
+  const why = typeof qrcode === 'undefined' ? 'the QR code library did not load'
+    : n > QR_MAX ? 'the URI is ' + n.toLocaleString('en') + ' bytes, a QR code holds ' + QR_MAX.toLocaleString('en') + ' at most' : '';
+  const canvas = $('qr');
+  canvas.hidden = !!why;
+  $('dlQr').disabled = !!why;
+  $('dlQr').title = why ? 'No QR code: ' + why : 'PNG of the QR code';
+  $('qrNote').textContent = why ? 'No QR code: ' + why + '.' : '';
+  if (why) return;
+  qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+  const qr = qrcode(0, 'L');
+  qr.addData(uri, 'Byte');
+  qr.make();
+  const count = qr.getModuleCount(), quiet = 4, scale = 4; // a 4-module quiet zone, as the standard asks
+  canvas.width = canvas.height = (count + 2 * quiet) * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#000';
+  for (let r = 0; r < count; r++)
+    for (let c = 0; c < count; c++) if (qr.isDark(r, c)) ctx.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
 }
 
 /* ---- Run --------------------------------------------------------------- */
@@ -375,13 +410,15 @@ async function copy(text, btn) {
 }
 $('copyHtml').onclick = e => copy($('outHtml').value, e.target);
 $('copyUri').onclick = e => copy($('outUri').value, e.target);
-$('download').onclick = () => {
+function save(blob, suffix) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([$('outHtml').value], { type: 'text/html' }));
-  a.download = fileName.replace(/\.html?$/i, '') + '.min.html';
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName.replace(/\.html?$/i, '') + suffix;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-};
+}
+$('download').onclick = () => save(new Blob([$('outHtml').value], { type: 'text/html' }), '.min.html');
+$('dlQr').onclick = () => $('qr').toBlob(blob => save(blob, '.qr.png'));
 </script>
 </body>
 </html>

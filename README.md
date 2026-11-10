@@ -16,7 +16,7 @@ Turns an HTML page, or a whole folder, into one file as small as possible: a `.h
      ```
    - **[Roadroller](https://github.com/lifthrasiir/roadroller)** (optional, slower, runs in a Web Worker).
 
-Outputs: the final HTML (copy, download), the `data:` URI (copy; only `%`, `#` and line breaks are percent-encoded), the sizes in bytes with their ratio, and a preview in a sandboxed iframe.
+Outputs: the final HTML (copy, download), the `data:` URI (copy; only `%`, `#` and line breaks are percent-encoded) and its QR code when it fits (up to 2,953 bytes; PNG download), the sizes in bytes with their ratio, and a preview in a sandboxed iframe.
 
 ## Input
 
