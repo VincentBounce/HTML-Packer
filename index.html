@@ -36,7 +36,7 @@
   button:disabled { opacity: .45; cursor: default; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
-  .note { color: var(--muted); font-size: 12px; }
+  .note { color: var(--muted); font-size: 12px; white-space: pre-line; } /* a \n in a note starts a new line */
   .note:empty { display: none; } /* an empty note takes no room (no line, no gap) */
   progress { width: 140px; height: 8px; }
   table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
@@ -51,7 +51,7 @@
 </head>
 <body>
 <header>
-  <h1>HTML Packer v0.4.4</h1> <!-- the version, bumped with each release; each release commit gets the tag v<version> -->
+  <h1>HTML Packer v0.4.5</h1> <!-- the version, bumped with each release; each release commit gets the tag v<version> -->
   <span>Paste or drop an HTML file, or a whole folder: its scripts, styles and files go inside the page; then minify, deflate or Roadroller; the smallest is kept.</span>
 </header>
 <main>
@@ -356,7 +356,7 @@ function showQr(uri) {
     ? 'No QR code: the URI is ' + n.toLocaleString('en') + ' bytes, a QR code holds ' + QR_MAX.toLocaleString('en') + ' at most' : 'No QR code: ' + why;
   // under the URI, each limit it passes: the QR code's, then the address bar's
   const paste = uri.length > PASTE_MAX ? '[' + size(uri.length - PASTE_MAX) + ' too many to paste as a URL in Chrome, Edge or Brave (512,000 characters at most); Firefox and Safari take it]' : '';
-  $('uriNote').textContent = [why, paste].filter(Boolean).join(' ');
+  $('uriNote').textContent = [why, paste].filter(Boolean).join('\n');
   if (why) return;
   qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
   const qr = qrcode(0, 'L');
