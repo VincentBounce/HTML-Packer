@@ -16,7 +16,7 @@ Turns an HTML page, or a whole folder, into one file as small as possible: a `.h
      ```
    - **[Roadroller](https://github.com/lifthrasiir/roadroller)** (optional, slower, runs in a Web Worker).
 
-Outputs: the final HTML (copy, download), the `data:` URI (copy; only `%`, `#` and line breaks are percent-encoded) and its QR code when it fits (up to 2,953 bytes; PNG download); a note says how much is too many for a QR code, or for each browser's address bar, one line each: Chrome, Edge and Brave keep 512,000 characters of a paste (a link or a navigation goes up to 2 MiB), Firefox and Waterfox take 32 MiB (512 MiB since Firefox 136), Safari 2,048 MiB ([MDN](https://developer.mozilla.org/en-US/docs/Web/URI/Reference/Schemes/data#length_limitations)), the sizes in bytes with their ratio, and a preview in a sandboxed iframe.
+Outputs: the final HTML (copy, download), the `data:` URI (copy; only `%`, `#` and line breaks are percent-encoded) and its QR code when it fits (up to 2,953 bytes; PNG download); a note gives every limit, one line each, with how much is too many or how much is to spare: the QR code's, then each browser's address bar: Chrome, Edge and Brave keep 512,000 characters of a paste (a link or a navigation goes up to 2 MiB), Firefox and Waterfox take 32 MiB (512 MiB since Firefox 136), Safari 2,048 MiB ([MDN](https://developer.mozilla.org/en-US/docs/Web/URI/Reference/Schemes/data#length_limitations)), the sizes in bytes with their ratio, and a preview in a sandboxed iframe.
 
 ## Input
 

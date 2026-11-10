@@ -51,7 +51,7 @@
 </head>
 <body>
 <header>
-  <h1>HTML Packer v0.4.7</h1> <!-- the version, bumped with each release; each release commit gets the tag v<version> -->
+  <h1>HTML Packer v0.4.8</h1> <!-- the version, bumped with each release; each release commit gets the tag v<version> -->
   <span>Paste or drop an HTML file, or a whole folder: its scripts, styles and files go inside the page; then minify, deflate or Roadroller; the smallest is kept.</span>
 </header>
 <main>
@@ -143,7 +143,11 @@ const bytesOf = async a => a.bytes ??= new Uint8Array(await a.file.arrayBuffer()
 const isDoc = path => /(^|\/)(license|licence|readme|changelog|copying)(\.[^/]*)?$|\.md$/i.test(path);
 const tickedFirst = key => !key.includes('/') && !isDoc(key);
 
-const size = n => n < 1000 ? n + ' B' : (n / (n < 1e6 ? 1e3 : 1e6)).toLocaleString('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + (n < 1e6 ? ' KB' : ' MB');
+const size = n => {
+  if (n < 1000) return n + ' B';
+  const [d, u] = n < 1e6 ? [1e3, ' KB'] : n < 1e9 ? [1e6, ' MB'] : [1e9, ' GB'];
+  return (n / d).toLocaleString('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + u;
+};
 
 // The fetch shim, put first in the page when files are left over: fetch() of one of them answers from the page.
 // files: { key: [mime, base64] }, or with binary: { key: [mime, start, end] } in the inflated bytes B (see packDeflateFiles)
@@ -345,25 +349,32 @@ const QR_MAX = 2953; // bytes held by the largest QR code (version 40, byte mode
 // - Firefox: 32 MiB from Firefox 97 to 135, 512 MiB since 136 (MDN, data: URLs); Waterfox follows an older ESR, so 32 MiB.
 // - Safari (WebKit): 2,048 MiB (MDN). Firefox, Waterfox and Safari opened Tessera's whole 613,019-character paste.
 const PASTE_LIMITS = [
-  { browsers: 'Chrome, Edge or Brave', max: 512000, shown: '512,000 characters' },
-  { browsers: 'Firefox or Waterfox', max: 32 * 2 ** 20, shown: '32 MiB' },
-  { browsers: 'Safari', max: 2048 * 2 ** 20, shown: '2,048 MiB' },
+  { browsers: 'Chrome, Edge or Brave', max: 512000 },
+  { browsers: 'Firefox or Waterfox', max: 32 * 2 ** 20 },
+  { browsers: 'Safari', max: 2048 * 2 ** 20 },
 ];
+
+// One line per limit, always shown, so the margin is known either way: how much too many, or how much to spare
+// (the limit itself as an exact count: 32 MiB is 33,554,432 characters, which a rounded size would blur)
+const limitLine = (n, max, what, unit) => {
+  const limit = max.toLocaleString('en') + ' ' + unit + ' at most';
+  return n > max ? '[' + size(n - max) + ' too many ' + what + ' (' + limit + ')]' : '[OK ' + what + ': ' + size(max - n) + ' to spare (' + limit + ')]';
+};
 
 function showQr(uri) {
   const n = bytes(uri);
-  // shown in place of the QR code; the button's tooltip gives the detail
-  const why = typeof qrcode === 'undefined' ? '[QR code library not loaded]'
-    : n > QR_MAX ? '[' + size(n - QR_MAX) + ' too many to fit a QR code]' : '';
+  // no QR code when its library is missing or the URI is too long; the button's tooltip gives the detail
+  const why = typeof qrcode === 'undefined' ? '[QR code library not loaded]' : n > QR_MAX ? 'too long' : '';
   const canvas = $('qr');
   canvas.hidden = !!why;
   $('dlQr').disabled = !!why;
   $('dlQr').title = !why ? 'PNG of the QR code' : n > QR_MAX
-    ? 'No QR code: the URI is ' + n.toLocaleString('en') + ' bytes, a QR code holds ' + QR_MAX.toLocaleString('en') + ' at most' : 'No QR code: ' + why;
-  // under the URI, one line per limit it passes: the QR code's, then each browser's
-  const paste = PASTE_LIMITS.filter(l => uri.length > l.max)
-    .map(l => '[' + size(uri.length - l.max) + ' too many to paste as a URL in ' + l.browsers + ' (' + l.shown + ' at most)]');
-  $('uriNote').textContent = [why, ...paste].filter(Boolean).join('\n');
+    ? 'No QR code: the URI is ' + n.toLocaleString('en') + ' bytes, a QR code holds ' + QR_MAX.toLocaleString('en') + ' at most' : 'No QR code: the QR code library did not load';
+  // under the URI, every limit: the QR code's, then each browser's
+  $('uriNote').textContent = [
+    typeof qrcode === 'undefined' ? why : limitLine(n, QR_MAX, 'to fit a QR code', 'bytes'),
+    ...PASTE_LIMITS.map(l => limitLine(uri.length, l.max, 'to paste as a URL in ' + l.browsers, 'characters')),
+  ].join('\n');
   if (why) return;
   qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
   const qr = qrcode(0, 'L');
